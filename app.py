@@ -16,11 +16,9 @@ def run_dummy_server():
         print(f"Dummy web server running on port {PORT}")
         httpd.serve_forever()
 
-# 在背景啟動網頁伺服器，讓 Render 知道機器人活著
 threading.Thread(target=run_dummy_server, daemon=True).start()
 # ======================================================================
 
-# 從系統讀取金鑰
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
@@ -33,20 +31,12 @@ SYSTEM_PROMPT = """
 """
 
 client = genai.Client(api_key=GEMINI_API_KEY)
-chat_sessions = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat_sessions[user_id] = client.chats.create(
-        model="gemini-2.5-flash",
-        config={"system_instruction": SYSTEM_PROMPT}
-    )
-    
     keyboard = [
         [InlineKeyboardButton("📞 撥打電話給菲米尼", callback_data='call_freminet')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text("（菲米尼正安靜地伏在桌前修理機械……）\n那個……請問找我有什麼事嗎？", reply_markup=reply_markup)
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -60,35 +50,43 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tts_voice = "zh-TW-YunJheNeural"
         voice_file = "call_start.ogg"
         
-        communicate = edge_tts.Communicate(reply_text, tts_voice)
-        await communicate.save(voice_file)
-        
-        with open(voice_file, "rb") as voice:
-            await context.bot.send_voice(chat_id=query.message.chat_id, voice=voice)
+        try:
+            communicate = edge_tts.Communicate(reply_text, tts_voice)
+            await communicate.save(voice_file)
+            with open(voice_file, "rb") as voice:
+                await context.bot.send_voice(chat_id=query.message.chat_id, voice=voice)
+        except Exception as e:
+            print(f"TTS Error: {e}")
+            await context.bot.send_message(chat_id=query.message.chat_id, text=reply_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     user_text = update.message.text
 
-    if user_id not in chat_sessions:
-        chat_sessions[user_id] = client.chats.create(
-            model="gemini-2.5-flash",
-            config={"system_instruction": SYSTEM_PROMPT}
+    try:
+        # 使用穩定支援的 gemini-2.0-flash 模型
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=f"{SYSTEM_PROMPT}\n\n使用者說：{user_text}"
         )
-    
-    chat = chat_sessions[user_id]
-    response = chat.send_message(user_text)
-    reply_text = response.text
+        reply_text = response.text
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
+        reply_text = "（菲米尼低著頭，小聲地說……）對不起，我剛才有點分神了……可以再說一次嗎？"
 
+    # 先傳送文字回覆
     await update.message.reply_text(reply_text)
 
-    tts_voice = "zh-TW-YunJheNeural"
-    voice_file = "response.ogg"
-    communicate = edge_tts.Communicate(reply_text, tts_voice)
-    await communicate.save(voice_file)
+    # 產生語音回覆
+    try:
+        tts_voice = "zh-TW-YunJheNeural"
+        voice_file = "response.ogg"
+        communicate = edge_tts.Communicate(reply_text, tts_voice)
+        await communicate.save(voice_file)
 
-    with open(voice_file, "rb") as voice:
-        await update.message.reply_voice(voice=voice)
+        with open(voice_file, "rb") as voice:
+            await update.message.reply_voice(voice=voice)
+    except Exception as e:
+        print(f"TTS Voice Error: {e}")
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
