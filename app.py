@@ -1,18 +1,28 @@
 import asyncio
 import os
-import nest_asyncio
+import http.server
+import socketserver
+import threading
 from google import genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import edge_tts
 
-nest_asyncio.apply()
+# ================= 配合 Render 免費網頁服務的極簡伺服器 =================
+PORT = int(os.environ.get("PORT", 10000))
+def run_dummy_server():
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), handler) as httpd:
+        print(f"Dummy web server running on port {PORT}")
+        httpd.serve_forever()
 
-# ================= 從環境變數安全讀取金鑰 =================
-# 注意：這裡不要填入真實的字串！Render 稍後會自動傳入這兩個變數
+# 在背景啟動網頁伺服器，讓 Render 知道機器人活著
+threading.Thread(target=run_dummy_server, daemon=True).start()
+# ======================================================================
+
+# 從系統讀取金鑰
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-# ========================================================
 
 SYSTEM_PROMPT = """
 你現在必須完全扮演《原神》中的角色【菲米尼】。
@@ -80,15 +90,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(voice_file, "rb") as voice:
         await update.message.reply_voice(voice=voice)
 
-async def main():
+def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("🤖 菲米尼已在免費雲端主機上線！")
-    await app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
-    asyncio.run(main())
-    asyncio.run(main())
+    main()
